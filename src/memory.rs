@@ -257,9 +257,9 @@ impl MemoryReference {
     /// `undefined`, and `Err` if incorrect type.
     ///
     /// Uses lodash in JavaScript to evaluate the path. See https://lodash.com/docs/#get.
-    pub fn get_path<T>(&self, path: &str) -> Result<Option<T>, ConversionError>
+    pub fn get_path<T, E>(&self, path: &str) -> Result<Option<T>, E>
     where
-        T: TryFrom<Value, Error = ConversionError>,
+        T: TryFrom<Value, Error = E>,
     {
         let val = js! {
             return _.get(@{self.as_ref()}, @{path});
