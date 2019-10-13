@@ -53,7 +53,7 @@ impl Position {
     where
         T: ?Sized + HasPosition,
     {
-        self.get_range_to(target) < range
+        self.get_range_to(target) <= range
     }
 
     #[inline]
