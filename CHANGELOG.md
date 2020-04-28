@@ -1,6 +1,89 @@
 Unreleased
 ==========
 
+- Add `game::map::get_room_status()` as interface to new `Game.map.getRoomStatus()` function
+- Remove deprecated `game::map::is_room_available()`, use new `get_room_status` instead
+- Add `StructureLab::reverse_reaction()` as interface to new `reverseReaction()`
+- Add `effects()` to room objects, allowing access to the effects applied on room objects which
+  are used by both strongholds and power creeps.  New `EffectType` enum returned by this call
+  represents the `NaturalEffectType` (for stronghold effects) or `PowerType` (for power creeps)
+- Move creep functions which are implemented identically on power creeps to `SharedCreepProperties`
+  trait (breaking)
+- Add `game::gpl::level()`, `game::gpl::progress()` and `game::gpl::progress_total()`
+- Add `StructureController::is_power_enabled()`
+- Add `game::power_creeps` access, which returns a special `AccountPowerCreep` reference due
+  to the fact that these power creeps may not be spawned on the current shard and allow spawning.
+  Use `AccountPowerCreep::get_power_creep()` which returns `Option<PowerCreep>` to get the living
+  power creep, if spawned on the current shard.
+- Add `PowerCreepClass` enum to represent power creep classes, currently only `Operator`
+- Update `StructureTower::attack()` and `heal()` to allow targeting power creeps, and update
+  `repair()` to accept `StructureProperties` matching `Creep::repair()`
+- Update `Creep::heal()` and `ranged_heal()` to target anything with the `SharedCreepProperties`
+  trait to allow use on power creeps
+- Add `MarketResourceType` enum, which can wrap either a `ResourceType` or `IntershardResourceType`
+  and switch to using it for `game::market` endpoints which accept either type (breaking)
+- Update integer representation of `IntershardResource::SubscriptionToken` to move out of conflict
+  with normal resources to allow parsing market orders which might have either (breaking)
+- Add `game::market::get_history()` and `game::market::OrderHistoryRecord` exposing new
+  `getHistory()` API function
+- Update `game::market` functions to be able to work with intershard orders and transactions for
+  them, making `RoomName` optional in many cases as it's not used for intershard transactions
+  (breaking)
+- Update field visibility on `game::market` structs used as return values to public, update to
+  native types for `ResourceType` and `RoomName` values, and make a number of fields optional for
+  compatibility with intershard orders (breaking)
+- Update `game::market::create_order()` to use the currently documented object syntax and new
+  `MarketResourceType` to specify resource (breaking)
+- Update `game::market::calc_transaction_cost()` to work with `RoomName` instead of `&Room` to
+  avoid requiring visibility of both rooms (breaking)
+- Change `game::map::describe_exits()` to use `RoomName` instead of `String` for values (breaking)
+- Add `Creep::move_pulled_by()` which allows a creep to accept another creep's attempt to `pull`
+- Remove `StructurePowerSpawn::power()` and `power_capacity()` (replaced with `HasStore` functions)
+- Remove explicitly implemented `Creep::energy()` function which used deprecated `.carry`, now
+  using the `energy()` implementation from `HasStore`
+- Change `RoomObjectProperties::room()` to return `Option<Room>` to handle the cases that the base
+  game API leaves it undefined: for construction sites and flags in non-visible rooms (breaking)
+- Fix `Room::find_path` function call to underlying javascript
+- Fix typo in `Position::create_named_construction_site` and work around screeps bug in
+  `Room::create_named_construction_site` by passing x and y instead of position object
+- Fix javascript associated object name for `StructureSpawn::spawning`
+- Correct swapped return types for `Mineral::density()` and `Mineral::mineral_amount()` and add
+  a workaround for some private servers returning floating point `mineralAmount` values
+- Fix typo in `StructureController::reservation()` ticks_to_end return value
+- Fix reversed conversion of `TOUGH` and `HEAL` parts
+- Fix `OwnedStructureProperties::has_owner()` to correctly return false for unowned structures
+- Work around a case where `map::describe_exits()` would panic when a private server returns null
+  for an unavailable room
+- Change `Source` and `Mineral` `ticks_to_regeneration()` functions to return 0, preventing panics
+  in cases where the game API returns negative or undefined values
+
+0.7.0 (2019-10-19)
+==================
+
+### Notably breaking:
+
+- Remove `CanStoreEnergy` trait, moving all structures and creeps to `HasStore`, migrating from
+  deprecated Screeps API endpoints to new `.store` API (breaking)
+    - Remove `Creep::carry_total()`, `Creep::carry_types()`, `Creep::carry_of()`
+    - Remove `StructureLab::mineral_amount()`, `StructureLab::mineral_capacity()`
+    - Remove `StructureNuker::ghodium()`, `StructureNuker::ghodium_capacity()`
+    - Change `HasStore::store_capacity()` to use new API and now takes `Option<ResourceType>`
+    - Add `HasStore::store_free_capacity()` and `HasStore::store_used_capacity()`, which both
+    take `Option<ResourceType>`
+- Change return type of `game::rooms::keys` from `Vec<String>` to `Vec<RoomName>`
+- Change `HasCooldown` trait to apply to objects with `RoomObjectProperties` instead of
+  `StructureProperties` due to addition of `Deposit` objects
+- Fix `Position::in_range_to` to be inclusive, to match documentation and JS behavior
+
+### Additions:
+
+- Add new `StructureFactory` and `StructureInvaderCore` structure types
+- Add a number of new constants related to factory operation and strongholds
+- Add new resource types for factory commodities
+- Add `Deposit` objects and related find/look constants
+- Add `Ruin` objects and related find/look constants
+- Change `Creep.harvest()` to work with any harvestable object type; `Deposit`, `Mineral`, and
+  `Source`
 - Add `ObjectId<T>`, a typed binary object ID, and `RawObjectId`, an untyped binary object ID
   - untyped ids can be converted to typed freely - the type is purely for type inference
   - `RoomObject::id` now returns `ObjectId<Self>`, and an `untyped_id` function is added for
@@ -9,16 +92,24 @@ Unreleased
     taking either id type
   - both types are 12 bytes large, and can represent all hex-formatted object IDs from the official
     server, the default private servers backend and the private server with ags131's mongodb mod
-- Rename incorrectly spelled `Density::probabilitiy` to `probability`.
-- Rename incorrectly spelled `Nuke::lauch_room_name` to `launch_room_name`.
-- Rename constants with typo `SPAWN_RENEW_RATION` and  `LINK_LOSS_RATION` to `SPAWN_RENEW_RATIO`
-  and `LINK_LOSS_RATIO` respectively
-- Change return type of `game::rooms::keys` from `Vec<String>` to `Vec<RoomName>`
-- Fix typos in JavaScript code for `game::market::get_order` and `Nuke::launch_room_name`
 - Add support for accessing intershard resource amounts, which currently only includes subscription
   tokens, under `game::resources`.
 - Implement `PartialOrd` and `Ord` for `Position`, `RoomName`, `RawObjectId` and `ObjectId`. See
   documentation for ordering specifications.
+
+### Bugfixes:
+
+- Fix typos in JavaScript code for `game::market::get_order` and `Nuke::launch_room_name`
+- Fix `Creep::body` crashing if body contained non-boosted parts
+- Fix JS syntax error in `Creep::move_to_with_options`
+- Remove usage of internal `stdweb` macros, which break with stdweb version changes
+- Rename incorrectly spelled `Density::probabilitiy` to `probability`.
+- Rename incorrectly spelled `Nuke::lauch_room_name` to `launch_room_name`.
+- Rename constants with typo `SPAWN_RENEW_RATION` and  `LINK_LOSS_RATION` to `SPAWN_RENEW_RATIO`
+  and `LINK_LOSS_RATIO` respectively
+
+### Misc:
+
 - Add a number of modules grouping constants together, such as `constants::creep` for creep related
   constants or `constants::minerals` for mineral related constants.
 - Remove remaining usages of internal `get_from_js!` macro, as it was minimally useful

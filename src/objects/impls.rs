@@ -1,14 +1,19 @@
 mod construction_site;
 mod container;
 mod creep;
+mod deposit;
 mod flag;
 mod mineral;
 mod nuke;
+mod power_creep;
 mod resource;
 mod room;
 mod room_terrain;
+mod ruin;
 mod source;
 mod structure_controller;
+mod structure_factory;
+mod structure_invader_core;
 mod structure_keeper_lair;
 mod structure_lab;
 mod structure_link;
@@ -24,9 +29,9 @@ mod structure_tower;
 mod tombstone;
 
 pub use self::{
-    creep::{Bodypart, MoveToOptions},
+    creep::Bodypart,
     room::{
-        AttackEvent, AttackType, BuildEvent, Event, EventType, ExitEvent, FindOptions,
+        AttackEvent, AttackType, BuildEvent, Effect, Event, EventType, ExitEvent, FindOptions,
         HarvestEvent, HealEvent, HealType, LookResult, ObjectDestroyedEvent, Path,
         PositionedLookResult, RepairEvent, ReserveControllerEvent, Step, UpgradeControllerEvent,
     },

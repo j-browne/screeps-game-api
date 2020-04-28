@@ -13,15 +13,15 @@ use stdweb::{Reference, Value};
 
 use crate::{
     constants::{
-        Color, Direction, ExitDirection, FindConstant, Look, LookConstant, PowerType, ResourceType,
-        ReturnCode, StructureType, Terrain,
+        Color, Direction, EffectType, ExitDirection, FindConstant, Look, LookConstant, PowerType,
+        ResourceType, ReturnCode, StructureType, Terrain,
     },
     local::{Position, RoomName},
     memory::MemoryReference,
     objects::{
-        ConstructionSite, Creep, Flag, HasPosition, Mineral, Nuke, PowerCreep, Resource, Room,
-        RoomTerrain, Source, Structure, StructureController, StructureStorage, StructureTerminal,
-        Tombstone,
+        ConstructionSite, Creep, Deposit, Flag, HasPosition, Mineral, Nuke, PowerCreep, Resource,
+        Room, RoomTerrain, Ruin, Source, Structure, StructureController, StructureStorage,
+        StructureTerminal, Tombstone,
     },
     pathfinder::CostMatrix,
     traits::{TryFrom, TryInto},
@@ -73,7 +73,11 @@ impl Room {
     {
         let pos = at.pos();
         js_unwrap!(@{self.as_ref()}.createConstructionSite(
-            pos_from_packed(@{pos.packed_repr()}),
+            // pos_from_packed(@{pos.packed_repr()}),
+            // workaround - passing with a position and a name
+            // currently broken, use x,y instead
+            @{pos.x()},
+            @{pos.y()},
             __structure_type_num_to_str(@{ty as u32}),
             @{name}
         ))
@@ -238,12 +242,12 @@ impl Room {
         // See https://docs.rs/scoped-tls/0.1/scoped_tls/
         COST_CALLBACK.set(&callback_lifetime_erased, || {
             let v = js! {
-                return @{&self.as_ref()}.search(
+                return @{&self.as_ref()}.findPath(
                     pos_from_packed(@{from.packed_repr()}),
                     pos_from_packed(@{to.packed_repr()}),
                     {
                         ignoreCreeps: @{ignore_creeps},
-                        ignoreDestructibleStructures: @{ignore_destructible_structures}
+                        ignoreDestructibleStructures: @{ignore_destructible_structures},
                         costCallback: @{callback},
                         maxOps: @{max_ops},
                         heuristicWeight: @{heuristic_weight},
@@ -760,12 +764,22 @@ pub struct PowerEvent {
     pub power: PowerType,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Effect {
+    pub effect: EffectType,
+    pub level: Option<u8>,
+    pub ticks_remaining: u32,
+}
+js_deserializable! {Effect}
+
 pub enum LookResult {
     Creep(Creep),
     Energy(Resource),
     Resource(Resource),
     Source(Source),
     Mineral(Mineral),
+    Deposit(Deposit),
     Structure(Structure),
     Flag(Flag),
     ConstructionSite(ConstructionSite),
@@ -773,6 +787,7 @@ pub enum LookResult {
     Terrain(Terrain),
     Tombstone(Tombstone),
     PowerCreep(PowerCreep),
+    Ruin(Ruin),
 }
 
 impl TryFrom<Value> for LookResult {
@@ -790,6 +805,7 @@ impl TryFrom<Value> for LookResult {
             Look::Resources => LookResult::Resource(js_unwrap_ref!(@{v}.resource)),
             Look::Sources => LookResult::Source(js_unwrap_ref!(@{v}.source)),
             Look::Minerals => LookResult::Mineral(js_unwrap_ref!(@{v}.mineral)),
+            Look::Deposits => LookResult::Deposit(js_unwrap_ref!(@{v}.deposit)),
             Look::Structures => LookResult::Structure(js_unwrap_ref!(@{v}.structure)),
             Look::Flags => LookResult::Flag(js_unwrap_ref!(@{v}.flag)),
             Look::ConstructionSites => {
@@ -799,6 +815,7 @@ impl TryFrom<Value> for LookResult {
             Look::Terrain => LookResult::Terrain(js_unwrap!(__terrain_str_to_num(@{v}.terrain))),
             Look::Tombstones => LookResult::Tombstone(js_unwrap_ref!(@{v}.tombstone)),
             Look::PowerCreeps => LookResult::PowerCreep(js_unwrap_ref!(@{v}.powerCreep)),
+            Look::Ruins => LookResult::Ruin(js_unwrap_ref!(@{v}.ruin)),
         };
         Ok(lr)
     }

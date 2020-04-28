@@ -3,14 +3,6 @@ use crate::{
     objects::{Creep, StructureLab},
 };
 
-simple_accessors! {
-    impl StructureLab {
-        pub fn mineral_amount() -> u32 = mineralAmount;
-        // mineralType
-        pub fn mineral_capacity() -> u32 = mineralCapacity;
-    }
-}
-
 impl StructureLab {
     pub fn mineral_type(&self) -> ResourceType {
         js_unwrap!(__resource_type_str_to_num(@{self.as_ref()}.mineralType))
@@ -25,6 +17,10 @@ impl StructureLab {
 
     pub fn run_reaction(&self, lab1: &StructureLab, lab2: &StructureLab) -> ReturnCode {
         js_unwrap! {@{self.as_ref()}.runReaction(@{lab1.as_ref()}, @{lab2.as_ref()})}
+    }
+
+    pub fn reverse_reaction(&self, lab1: &StructureLab, lab2: &StructureLab) -> ReturnCode {
+        js_unwrap! {@{self.as_ref()}.reverseReaction(@{lab1.as_ref()}, @{lab2.as_ref()})}
     }
 
     pub fn unboost_creep(&self, creep: &Creep) -> ReturnCode {

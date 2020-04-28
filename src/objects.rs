@@ -23,13 +23,15 @@ use crate::{
     ConversionError,
 };
 
+mod creep_shared;
 mod impls;
 mod structure;
 
 pub use self::{
+    creep_shared::{MoveToOptions, SharedCreepProperties},
     impls::{
-        AttackEvent, AttackType, Bodypart, BuildEvent, Event, EventType, ExitEvent, FindOptions,
-        HarvestEvent, HealEvent, HealType, LookResult, MoveToOptions, ObjectDestroyedEvent, Path,
+        AttackEvent, AttackType, Bodypart, BuildEvent, Effect, Event, EventType, ExitEvent,
+        FindOptions, HarvestEvent, HealEvent, HealType, LookResult, ObjectDestroyedEvent, Path,
         PortalDestination, PositionedLookResult, RepairEvent, Reservation, ReserveControllerEvent,
         Sign, SpawnOptions, Step, UpgradeControllerEvent,
     },
@@ -41,6 +43,8 @@ reference_wrappers! {
     pub struct ConstructionSite(...);
     #[reference(instance_of = "Creep")]
     pub struct Creep(...);
+    #[reference(instance_of = "Deposit")]
+    pub struct Deposit(...);
     #[reference(instance_of = "Flag")]
     pub struct Flag(...);
     #[reference(instance_of = "Mineral")]
@@ -57,6 +61,8 @@ reference_wrappers! {
     pub struct RoomObject(...);
     #[reference(instance_of = "Room.Terrain")]
     pub struct RoomTerrain(...);
+    #[reference(instance_of = "Ruin")]
+    pub struct Ruin(...);
     #[reference(instance_of = "Source")]
     pub struct Source(...);
     #[reference(instance_of = "StructureContainer")]
@@ -67,6 +73,10 @@ reference_wrappers! {
     pub struct StructureExtension(...);
     #[reference(instance_of = "StructureExtractor")]
     pub struct StructureExtractor(...);
+    #[reference(instance_of = "StructureFactory")]
+    pub struct StructureFactory(...);
+    #[reference(instance_of = "StructureInvaderCore")]
+    pub struct StructureInvaderCore(...);
     #[reference(instance_of = "StructureKeeperLair")]
     pub struct StructureKeeperLair(...);
     #[reference(instance_of = "StructureLab")]
@@ -89,7 +99,7 @@ reference_wrappers! {
     pub struct StructureRoad(...);
     #[reference(instance_of = "StructureSpawn")]
     pub struct StructureSpawn(...);
-    #[reference(instance_of = "Spawning")]
+    #[reference(instance_of = "StructureSpawn.Spawning")]
     pub struct Spawning(...);
     #[reference(instance_of = "StructureStorage")]
     pub struct StructureStorage(...);
@@ -106,6 +116,9 @@ reference_wrappers! {
     pub struct Tombstone(...);
     #[reference(instance_of = "PowerCreep")]
     pub struct PowerCreep(...);
+    // representation returned by game::power_creeps::*, which may be alive on the current shard or not
+    #[reference(instance_of = "AccountPowerCreep")]
+    pub struct AccountPowerCreep(...);
 }
 
 /// Trait for things which have positions in the Screeps world.
@@ -166,9 +179,11 @@ pub unsafe trait HasId: RoomObjectProperties {
 impl_has_id! {
     ConstructionSite,
     Creep,
+    Deposit,
     Mineral,
     Nuke,
     Resource,
+    Ruin,
     Source,
     OwnedStructure,
     Structure,
@@ -176,6 +191,8 @@ impl_has_id! {
     StructureController,
     StructureExtension,
     StructureExtractor,
+    StructureFactory,
+    StructureInvaderCore,
     StructureKeeperLair,
     StructureLab,
     StructureLink,
@@ -203,8 +220,14 @@ impl_has_id! {
 /// The reference returned by `AsRef<Reference>::as_ref` must reference a
 /// JavaScript object extending the `RoomObject` class.
 pub unsafe trait RoomObjectProperties: AsRef<Reference> + HasPosition {
-    fn room(&self) -> Room {
+    /// The room that the object is in, or `None` if an object is a flag or a
+    /// construction site and is placed in a room that is not visible to you.
+    fn room(&self) -> Option<Room> {
         js_unwrap_ref!(@{self.as_ref()}.room)
+    }
+
+    fn effects(&self) -> Vec<Effect> {
+        js_unwrap!(@{self.as_ref()}.effects || [])
     }
 }
 
@@ -279,10 +302,10 @@ pub unsafe trait OwnedStructureProperties: StructureProperties {
     fn my(&self) -> bool {
         js_unwrap!(@{self.as_ref()}.my || false)
     }
-    /// Whether this structure is currently owned by someone (in JS: `my !==
+    /// Whether this structure is currently owned by someone (in JS: `owner !==
     /// undefined`)
     fn has_owner(&self) -> bool {
-        js_unwrap!(@{self.as_ref()}.my !== undefined)
+        js_unwrap!(@{self.as_ref()}.owner !== undefined)
     }
     /// The name of the owner of this structure, if any.
     fn owner_name(&self) -> Option<String> {
@@ -312,12 +335,11 @@ pub unsafe trait OwnedStructureProperties: StructureProperties {
 /// # Contracts
 ///
 /// The JavaScript object referenced by the return of `AsRef<Reference>::as_ref`
-/// must have a `store` property. Additionally, if it does not have a
-/// `storeCapacity` property, `HasStore::store_capacity` must be overridden.
+/// must have a `store` property.
 ///
-/// The `store` property must be a dict from string resource types to integers.
-///
-/// If present, the `storeCapacity` property must be an integer.
+/// The `store` property must be a dict from string resource types to integers,
+/// and have the `getCapacity`, `getFreeCapacity`, and `getUsedCapacity`
+/// functions
 pub unsafe trait HasStore: RoomObjectProperties {
     fn store_total(&self) -> u32 {
         js_unwrap!(_.sum(@{self.as_ref()}.store))
@@ -335,24 +357,31 @@ pub unsafe trait HasStore: RoomObjectProperties {
         js_unwrap!(@{self.as_ref()}.store[RESOURCE_ENERGY])
     }
 
-    fn store_capacity(&self) -> u32 {
-        js_unwrap!(@{self.as_ref()}.storeCapacity)
-    }
-}
-
-/// Trait for objects which can only store energy.
-///
-/// # Contract
-///
-/// The reference returned from `AsRef<Reference>::as_ref` must be have an
-/// `energy` and an `energyCapacity` properties.
-pub unsafe trait CanStoreEnergy: StructureProperties {
-    fn energy(&self) -> u32 {
-        js_unwrap! { @{self.as_ref()}.energy }
+    fn store_capacity(&self, resource: Option<ResourceType>) -> u32 {
+        match resource {
+            Some(ty) => {
+                js_unwrap!(@{self.as_ref()}.store.getCapacity(__resource_type_num_to_str(@{ty as u32})) || 0)
+            }
+            None => js_unwrap!(@{self.as_ref()}.store.getCapacity() || 0),
+        }
     }
 
-    fn energy_capacity(&self) -> u32 {
-        js_unwrap! { @{self.as_ref()}.energyCapacity }
+    fn store_free_capacity(&self, resource: Option<ResourceType>) -> u32 {
+        match resource {
+            Some(ty) => {
+                js_unwrap!(@{self.as_ref()}.store.getFreeCapacity(__resource_type_num_to_str(@{ty as u32})) || 0)
+            }
+            None => js_unwrap!(@{self.as_ref()}.store.getFreeCapacity() || 0),
+        }
+    }
+
+    fn store_used_capacity(&self, resource: Option<ResourceType>) -> u32 {
+        match resource {
+            Some(ty) => {
+                js_unwrap!(@{self.as_ref()}.store.getUsedCapacity(__resource_type_num_to_str(@{ty as u32})) || 0)
+            }
+            None => js_unwrap!(@{self.as_ref()}.store.getUsedCapacity() || 0),
+        }
     }
 }
 
@@ -363,7 +392,7 @@ pub unsafe trait CanStoreEnergy: StructureProperties {
 ///
 /// The reference returned from `AsRef<Reference>::as_ref` must be able to be
 /// used by a spawner to create a new creep.
-pub unsafe trait HasEnergyForSpawn: CanStoreEnergy {}
+pub unsafe trait HasEnergyForSpawn: HasStore {}
 
 /// Trait for objects which have to cooldown.
 ///
@@ -371,7 +400,7 @@ pub unsafe trait HasEnergyForSpawn: CanStoreEnergy {}
 ///
 /// The reference returned from `AsRef<Reference>::as_ref` must be have a
 /// `cooldown` properties.
-pub unsafe trait HasCooldown: StructureProperties {
+pub unsafe trait HasCooldown: RoomObjectProperties {
     fn cooldown(&self) -> u32 {
         js_unwrap! { @{self.as_ref()}.cooldown }
     }
@@ -408,6 +437,15 @@ pub unsafe trait Transferable: RoomObjectProperties {}
 pub unsafe trait Withdrawable: RoomObjectProperties {}
 
 /// Trait for all wrappers over Screeps JavaScript objects which can be the
+/// target of `Creep.harvest`.
+///
+/// # Contracts
+///
+/// The reference returned from `AsRef<Reference>::as_ref` must be a valid
+/// target for `Creep.harvest`.
+pub unsafe trait Harvestable: RoomObjectProperties {}
+
+/// Trait for all wrappers over Screeps JavaScript objects which can be the
 /// target of `Creep.attack`.
 ///
 /// # Contracts
@@ -442,6 +480,7 @@ pub unsafe trait Attackable: RoomObjectProperties {
 unsafe impl Transferable for StructureExtension {}
 unsafe impl Transferable for Creep {}
 unsafe impl Transferable for StructureContainer {}
+unsafe impl Transferable for StructureFactory {}
 unsafe impl Transferable for StructureLab {}
 unsafe impl Transferable for StructureLink {}
 unsafe impl Transferable for StructureNuker {}
@@ -450,12 +489,15 @@ unsafe impl Transferable for StructureStorage {}
 unsafe impl Transferable for StructureTower {}
 unsafe impl Transferable for StructurePowerSpawn {}
 unsafe impl Transferable for StructureTerminal {}
+unsafe impl Transferable for PowerCreep {}
 
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
 
+unsafe impl Withdrawable for Ruin {}
 unsafe impl Withdrawable for StructureExtension {}
 unsafe impl Withdrawable for StructureContainer {}
+unsafe impl Withdrawable for StructureFactory {}
 unsafe impl Withdrawable for StructureLab {}
 unsafe impl Withdrawable for StructureLink {}
 unsafe impl Withdrawable for StructureSpawn {}
@@ -465,6 +507,10 @@ unsafe impl Withdrawable for StructurePowerSpawn {}
 unsafe impl Withdrawable for StructureTerminal {}
 unsafe impl Withdrawable for Tombstone {}
 
+unsafe impl Harvestable for Deposit {}
+unsafe impl Harvestable for Mineral {}
+unsafe impl Harvestable for Source {}
+
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
 
@@ -473,6 +519,8 @@ unsafe impl Attackable for OwnedStructure {}
 unsafe impl Attackable for StructureContainer {}
 unsafe impl Attackable for StructureExtension {}
 unsafe impl Attackable for StructureExtractor {}
+unsafe impl Attackable for StructureFactory {}
+unsafe impl Attackable for StructureInvaderCore {}
 unsafe impl Attackable for StructureKeeperLair {}
 unsafe impl Attackable for StructureLab {}
 unsafe impl Attackable for StructureLink {}
@@ -487,20 +535,25 @@ unsafe impl Attackable for StructureStorage {}
 unsafe impl Attackable for StructureTerminal {}
 unsafe impl Attackable for StructureTower {}
 unsafe impl Attackable for StructureWall {}
+unsafe impl Attackable for PowerCreep {}
 
 unsafe impl RoomObjectProperties for ConstructionSite {}
 unsafe impl RoomObjectProperties for Creep {}
+unsafe impl RoomObjectProperties for Deposit {}
 unsafe impl RoomObjectProperties for Flag {}
 unsafe impl RoomObjectProperties for Mineral {}
 unsafe impl RoomObjectProperties for Nuke {}
 unsafe impl RoomObjectProperties for OwnedStructure {}
 unsafe impl RoomObjectProperties for Resource {}
 unsafe impl RoomObjectProperties for RoomObject {}
+unsafe impl RoomObjectProperties for Ruin {}
 unsafe impl RoomObjectProperties for Source {}
 unsafe impl RoomObjectProperties for StructureContainer {}
 unsafe impl RoomObjectProperties for StructureController {}
 unsafe impl RoomObjectProperties for StructureExtension {}
 unsafe impl RoomObjectProperties for StructureExtractor {}
+unsafe impl RoomObjectProperties for StructureFactory {}
+unsafe impl RoomObjectProperties for StructureInvaderCore {}
 unsafe impl RoomObjectProperties for StructureKeeperLair {}
 unsafe impl RoomObjectProperties for StructureLab {}
 unsafe impl RoomObjectProperties for StructureLink {}
@@ -527,6 +580,8 @@ impl_structure_properties! {
     StructureController,
     StructureExtension,
     StructureExtractor,
+    StructureFactory,
+    StructureInvaderCore,
     StructureKeeperLair,
     StructureLab,
     StructureLink,
@@ -548,6 +603,8 @@ unsafe impl OwnedStructureProperties for OwnedStructure {}
 unsafe impl OwnedStructureProperties for StructureController {}
 unsafe impl OwnedStructureProperties for StructureExtension {}
 unsafe impl OwnedStructureProperties for StructureExtractor {}
+unsafe impl OwnedStructureProperties for StructureFactory {}
+unsafe impl OwnedStructureProperties for StructureInvaderCore {}
 unsafe impl OwnedStructureProperties for StructureKeeperLair {}
 unsafe impl OwnedStructureProperties for StructureLab {}
 unsafe impl OwnedStructureProperties for StructureLink {}
@@ -564,25 +621,21 @@ unsafe impl OwnedStructureProperties for StructureTower {}
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
 
+unsafe impl HasStore for Creep {}
+unsafe impl HasStore for Ruin {}
 unsafe impl HasStore for StructureContainer {}
+unsafe impl HasStore for StructureExtension {}
+unsafe impl HasStore for StructureFactory {}
+unsafe impl HasStore for StructureLab {}
+unsafe impl HasStore for StructureLink {}
+unsafe impl HasStore for StructureNuker {}
+unsafe impl HasStore for StructurePowerSpawn {}
+unsafe impl HasStore for StructureSpawn {}
 unsafe impl HasStore for StructureStorage {}
 unsafe impl HasStore for StructureTerminal {}
-unsafe impl HasStore for Tombstone {
-    fn store_capacity(&self) -> u32 {
-        0 // no storeCapacity property
-    }
-}
-
-// NOTE: keep impls for Structure* in sync with accessor methods in
-// src/objects/structure.rs
-
-unsafe impl CanStoreEnergy for StructureExtension {}
-unsafe impl CanStoreEnergy for StructureLab {}
-unsafe impl CanStoreEnergy for StructureLink {}
-unsafe impl CanStoreEnergy for StructureNuker {}
-unsafe impl CanStoreEnergy for StructurePowerSpawn {}
-unsafe impl CanStoreEnergy for StructureSpawn {}
-unsafe impl CanStoreEnergy for StructureTower {}
+unsafe impl HasStore for StructureTower {}
+unsafe impl HasStore for Tombstone {}
+unsafe impl HasStore for PowerCreep {}
 
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
@@ -593,7 +646,9 @@ unsafe impl HasEnergyForSpawn for StructureSpawn {}
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
 
+unsafe impl HasCooldown for Deposit {}
 unsafe impl HasCooldown for StructureExtractor {}
+unsafe impl HasCooldown for StructureFactory {}
 unsafe impl HasCooldown for StructureLab {}
 unsafe impl HasCooldown for StructureLink {}
 unsafe impl HasCooldown for StructureNuker {}
@@ -602,6 +657,8 @@ unsafe impl HasCooldown for StructureTerminal {}
 // NOTE: keep impls for Structure* in sync with accessor methods in
 // src/objects/structure.rs
 
+unsafe impl CanDecay for Deposit {}
+unsafe impl CanDecay for Ruin {}
 unsafe impl CanDecay for StructureContainer {}
 unsafe impl CanDecay for StructurePowerBank {}
 unsafe impl CanDecay for StructurePortal {}

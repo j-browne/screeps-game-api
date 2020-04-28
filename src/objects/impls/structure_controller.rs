@@ -4,6 +4,7 @@ use crate::{constants::ReturnCode, objects::StructureController};
 
 simple_accessors! {
     impl StructureController {
+        pub fn is_power_enabled() -> bool = isPowerEnabled;
         pub fn level() -> u32 = level;
         pub fn progress() -> Option<u32> = progress;
         pub fn progress_total() -> Option<u32> = progressTotal;
@@ -38,7 +39,7 @@ impl StructureController {
         if let Value::Reference(r) = js!(return @{self.as_ref()}.reservation;) {
             Some(Reservation {
                 username: js_unwrap!(@{&r}.username),
-                ticks_to_end: js_unwrap!(@{&r}.ticks_to_end),
+                ticks_to_end: js_unwrap!(@{&r}.ticksToEnd),
             })
         } else {
             None

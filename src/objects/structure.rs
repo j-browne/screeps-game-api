@@ -3,7 +3,7 @@ use stdweb::{InstanceOf, Reference, ReferenceType, Value};
 use super::*;
 use crate::{
     constants::StructureType,
-    objects::{Attackable, CanDecay, CanStoreEnergy, HasCooldown, HasEnergyForSpawn, HasStore},
+    objects::{Attackable, CanDecay, HasCooldown, HasEnergyForSpawn, HasStore},
     traits::FromExpectedType,
     ConversionError,
 };
@@ -52,6 +52,8 @@ pub enum Structure {
     Controller(StructureController),
     Extension(StructureExtension),
     Extractor(StructureExtractor),
+    Factory(StructureFactory),
+    InvaderCore(StructureInvaderCore),
     KeeperLair(StructureKeeperLair),
     Lab(StructureLab),
     Link(StructureLink),
@@ -94,7 +96,7 @@ impl Structure {
         match_some_structure_variants!(
             self,
             {
-                Container, Extension, Lab, Link, Nuker, PowerSpawn, Spawn, Storage, Terminal, Tower
+                Container, Extension, Factory, Lab, Link, Nuker, PowerSpawn, Spawn, Storage, Terminal, Tower
             },
             v => v
         )
@@ -105,7 +107,7 @@ impl Structure {
         match_some_structure_variants!(
             self,
             {
-                Container, Extension, Lab, Link, PowerSpawn, Spawn, Storage, Terminal, Tower
+                Container, Extension, Factory, Lab, Link, PowerSpawn, Spawn, Storage, Terminal, Tower
             },
             v => v
         )
@@ -124,6 +126,8 @@ impl Structure {
             Structure::Container(v) => Some(v),
             Structure::Extension(v) => Some(v),
             Structure::Extractor(v) => Some(v),
+            Structure::Factory(v) => Some(v),
+            Structure::InvaderCore(v) => Some(v),
             Structure::KeeperLair(v) => Some(v),
             Structure::Lab(v) => Some(v),
             Structure::Link(v) => Some(v),
@@ -158,6 +162,8 @@ impl Structure {
             Structure::Controller(v) => Some(v),
             Structure::Extension(v) => Some(v),
             Structure::Extractor(v) => Some(v),
+            Structure::Factory(v) => Some(v),
+            Structure::InvaderCore(v) => Some(v),
             Structure::KeeperLair(v) => Some(v),
             Structure::Lab(v) => Some(v),
             Structure::Link(v) => Some(v),
@@ -186,21 +192,11 @@ impl Structure {
         )
     }
 
-    pub fn as_can_store_energy(&self) -> Option<&dyn CanStoreEnergy> {
-        match_some_structure_variants!(
-            self,
-            {
-                Extension, Lab, Link, Nuker, PowerSpawn, Spawn, Tower
-            },
-            v => v
-        )
-    }
-
     pub fn as_has_cooldown(&self) -> Option<&dyn HasCooldown> {
         match_some_structure_variants!(
             self,
             {
-                Extractor, Lab, Link, Nuker, Terminal
+                Extractor, Factory, Lab, Link, Nuker, Terminal
             },
             v => v
         )
@@ -220,7 +216,7 @@ impl Structure {
         match_some_structure_variants!(
             self,
             {
-                Container, Storage, Terminal
+                Container, Extension, Factory, Lab, Link, Nuker, PowerSpawn, Spawn, Storage, Terminal, Tower
             },
             v => v
         )
